@@ -1,0 +1,737 @@
+---
+title: "Predicting Mental Health Using Music"
+author: "Andrew Shao and Joy Qiu"
+date: "2025-05-14"
+output: pdf_document
+header-includes: 
+  - \usepackage{tikz}
+  - \usepackage{fvextra}
+  - \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,commandchars=\\\{\}}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+Mental health has become one of the most pressing challenges in public health, especially among young adults and adolescents in an increasingly complex social and digital world. The burden of mental disorders such as anxiety, depression, insomnia, and obsessive-compulsive disorder (OCD) continues to increase, prompting urgent calls for innovative, accessible approaches to both prevention and early detection. While traditional tools, such as psychological screening, clinical interviews, and therapy, remain central to diagnosis and care, researchers and health professionals are also exploring other indicators of mental well-being, especially those embedded in daily life. \
+
+Music is one of the most universal human experiences. It transcends language, permeates culture, and accompanies people through joy, sorrow, stress, and healing. Music is a way for many individuals to process emotions and regulate their mood. Given its deeply personal and affective role, it is reasonable to explore whether music taste can reveal information about one's mental state. Perhaps preferences in genre, listening frequency, or the emotional connection to music can provide insight into one’s mental state. \
+
+In this project, we explore that idea using machine learning. Using a publicly available dataset that includes individuals’ music-listening habits and self-reported mental health scores, we built and evaluated predictive models to determine whether patterns in musical behavior are meaningfully linked to psychological well-being. Rather than assuming a causal relationship, we investigate whether these patterns hold enough signal to make mental health status at least partially predictable. \
+
+We aim to assess which algorithms most effectively capture any associations between music habits and mental health and evaluate whether such data could inform future public health strategies or personalized interventions. We aim to contribute a small but meaningful step toward holistic, data-informed mental wellness research.
+
+## Related Work 
+
+The relationship between music and mental health has gained increasing attention in psychological and behavioral research, particularly regarding how musical engagement can reflect or influence emotional well-being. A prominent study area has been the association between music preferences and personality or mental health traits. For example, Rentfrow and Gosling (2003) demonstrated that individuals’ music genre preferences correspond to stable personality characteristics, such as openness to experience and emotional stability. These findings suggest that the type of music someone listens to may provide insights into their internal emotional and mental state. \
+
+Additional research has explored how intense or emotionally charged music genres are used for emotion regulation. Sharman and Dingle (2015) specifically investigated the effects of extreme metal music and found that, rather than amplifying anger, listening to this genre actually helped fans process and calm their emotions. This counters the common assumption that heavy or aggressive music worsens emotional states and instead supports the idea that such genres may serve a cathartic or regulatory role for certain listeners. \
+
+Another key contribution comes from Garrido and Schubert (2013), who examined the phenomenon of individuals listening to sad music during periods of emotional distress. Their research suggests that sad music may offer comfort and emotional resonance, providing a space for reflection rather than exacerbating depressive symptoms. This challenges traditional views that link melancholic music to worsening mood and instead frames it as a potential emotional coping tool. \
+
+Despite these advances, the field focuses mainly on correlation rather than prediction. Most studies highlight associations between musical behavior and emotional tendencies, but few have applied machine learning to predict mental health status based on those patterns. Our project aims to bridge that gap by using supervised learning models to determine whether musical engagement, particularly genre preferences and listening frequency, contains predictive value for mental health burden. We hope to gather actionable, data-driven insights. 
+
+## Methods
+
+[The original dataset was downloaded from Kaggle](https://www.kaggle.com/datasets/catherinerasgaitis/mxmh-survey-results) and contains 736 observations and 33 variables. The data was collected from a survey posted online to various social media platforms and forums like Reddit and Discord. The original features are participants’ anonymous responses to the 31 survey questions, which ask about individuals’ music listening habits and preferences, age, and a self-reported measure of how often they experience anxiety, depression, insomnia, and obsessive-compulsive disorder (OCD) on a scale from 1-10. Sixteen features were responses to questions asking how frequently participants listened to different music genres (e.g., rock, pop, metal, EDM, classical). These frequency responses are categorical: with responses being one of “Never,” “Rarely,” “Sometimes,” and “Very frequently”. Additionally, there were two features that correspond to a submission timestamp used to identify individuals and a consent indicator. \
+
+The central research question of our study was whether music-listening behaviors, such as frequency, genre preference, and time spent listening, can predict self-reported mental health status. To operationalize this, we defined a continuous response variable by summing the four mental health variables from the dataset. The resulting composite mental health score ranged from 0, corresponding to no symptoms, to 40, corresponding to severe combined symptoms (See Figure 1). This variable served as the response variable for all modeling approaches. 
+
+### Modeling 
+To address the prediction task, we experimented with a diverse set of regression machine learning algorithms:
+
+\begin{itemize}
+    \item \textbf{Linear Regression}
+    \begin{itemize}
+        \item \textbf{Multiple Linear Regression}
+        \item \textbf{Feature Selection:} Best subset regression, forward stepwise selection, and backward stepwise selection were evaluated to determine the optimal selection method. We also evaluated the following selection criteria: R\textsuperscript{2}, Mallow’s C\textsubscript{p}, and Bayesian Information Criterion (BIC).
+        \item \textbf{LASSO Regression}
+    \end{itemize}
+    
+    \item \textbf{K-Nearest Neighbors (KNN)}
+    
+    \item \textbf{Decision Trees}
+    \begin{itemize}
+        \item \textbf{Pruning}
+        \item \textbf{Random Forests}
+        \item \textbf{Boosting:} We used gradient boosting machines (GBM).
+    \end{itemize}
+\end{itemize}
+
+
+## Data and Experiment Setup
+
+### Preprocessing
+
+Before applying any algorithms, we cleaned and preprocessed the dataset to ensure consistency and model-readiness. All rows with missing values were removed, reducing the dataset from 736 to 622 complete observations. We treated the genre frequency features as numerical rather than one-hot encoded categories by recoding them as integers from 0 to 3, with zero corresponding to an original response of “Never” and three corresponding to a response of “Very frequently”. We also excluded non-numeric or multiple-category string features for simplicity and interpretability purposes. We recoded and dropped these features for simplicity and interpretability, as including them in the analysis would’ve added more than a hundred dummy variables. This left us with a final feature set of 25 variables.
+
+```{r, include=FALSE}
+## Packages
+
+library(tidyverse)
+library(fastDummies)
+library(glmnet)
+library(leaps)
+library(caret)
+library(tree)
+library(randomForest)
+library(gbm)
+```
+
+```{r, include=FALSE}
+## Read Dataset
+mxmh_survey_results <- read_csv("mxmh_survey_results.csv")
+# View(mxmh_survey_results)
+```
+
+```{r, include=FALSE}
+## Preprocessing
+
+df <- mxmh_survey_results %>% 
+  # generate response variable
+  mutate(mental = Anxiety + Depression + Insomnia + OCD) %>%
+  
+  # drop categorical features
+  dplyr::select(-c(Timestamp, `Primary streaming service`, `Music effects`, `Fav genre`, Anxiety, Depression, Insomnia, OCD, Permissions)) %>% 
+  
+  # recode frequency features as numerical (0-3)
+  mutate(across(starts_with('Frequency'), 
+                            ~ case_when(
+                              .x == 'Never' ~ 0,
+                              .x == 'Rarely' ~ 1,
+                              .x == 'Sometimes' ~ 2,
+                              .x == 'Very frequently' ~ 3
+                            ))) %>%
+  
+  # drop missing values
+  drop_na() %>%
+  
+  # dummy variables
+  dummy_cols(remove_first_dummy = T, remove_selected_columns = T)
+
+# rename features
+colnames(df) <- c('age', 'hours', 'BPM',
+                  'classical', 'country', 'EDM', 'folk', 'gospel', 'hiphop', 'jazz', 'kpop', 'latin', 'lofi', 'metal', 'pop', 'rnb', 'rap', 'rock', 'gaming', 'mental',
+                  'working', 'instrument', 'composer', 'explore', 'languages')
+
+# extract X and y matrices
+X <- df %>% dplyr::select(-mental) %>% as.matrix()
+y <- df %>% pull(mental) %>% as.matrix()
+```
+
+### Model Training
+
+Because the original dataset does not include a predefined test set, we adopted a strategy using nested 10-fold cross-validation (CV) to select parameters as well as evaluate performance robustly. Each model was trained and tested on different data partitions using 10-fold CV. When appropriate, the training folds were partitioned again using 10-fold CV to select optimal hyperparameters. This approach helps prevent overfitting and ensures information leakage does not bias the testing performance results or affect hyperparameter selection.
+
+```{r, include=FALSE}
+## CV indices
+
+set.seed(22)
+
+n_all <- nrow(df)
+
+K.1 <- 10 # number of outer folds
+K.2 <- 10 # number of inner folds
+f.1 <- ceiling(n_all/K.1) # observations per fold
+fold_ind.1 <- sample(rep(1L:K.1, f.1), n_all) # fold indices
+```
+
+
+### Model Evaluation
+
+The models were evaluated using 10-fold CV with Mean Squared Error (MSE) as the performance metric for comparison.
+
+
+```{r, include=FALSE}
+## Multiple Linear Regression
+
+tr_err <- NULL # training errors
+te_err <- NULL # testing errors
+
+for (i in 1:K.1) {
+  X_train <- X[fold_ind.1 != i, ]
+  y_train <- y[fold_ind.1 != i]
+  X_test <- X[fold_ind.1 == i, ]
+  y_test <- y[fold_ind.1 == i]
+  
+  fit <- lm(mental ~ ., data = df[fold_ind.1 != i, ])
+  # print(summary(fit))
+  
+  train_pred <- predict(fit, as.tibble(X_train))
+  tr_err <- c(tr_err, mean((train_pred - y_train)^2))
+  test_pred <- predict(fit, as.tibble(X_test))
+  te_err <- c(te_err, mean((test_pred - y_test)^2))
+}
+
+mlr_tr_mean <- round(mean(tr_err), 3)
+mlr_te_mean <- round(mean(te_err), 3)
+mlr_te_best <- round(min(te_err), 3)
+```
+
+
+```{r, warning=FALSE, include=FALSE}
+## LASSO
+
+set.seed(2)
+
+tr_err <- NULL
+te_err <- NULL
+
+for (i in 1:K.1) {
+  X_train <- X[fold_ind.1 != i, ]
+  y_train <- y[fold_ind.1 != i]
+  X_test <- X[fold_ind.1 == i, ]
+  y_test <- y[fold_ind.1 == i]
+  
+  cv_lasso <- cv.glmnet(X_train, y_train, alpha = 1, nfolds = K.2)
+  lasso <- glmnet(X_train, y_train, alpha = 1, lambda = cv_lasso$lambda.min)
+  # print(lasso$beta)
+  
+  train_pred <- predict(lasso, newx = X_train)
+  tr_err <- c(tr_err, mean((train_pred - y_train)^2))
+  test_pred <- predict(lasso, newx = X_test)
+  te_err <- c(te_err, mean((test_pred - y_test)^2))
+}
+
+LASSO_tr_mean <- round(mean(tr_err), 3)
+LASSO_te_mean <- round(mean(te_err), 3)
+LASSO_te_best <- round(min(te_err), 3)
+```
+
+
+```{r, warning=FALSE, include=FALSE}
+## Feature selection
+
+set.seed(2)
+
+
+methods <- c("exhaustive","backward", "forward")
+method_names <- c('Best subset', 'Backwards stepwise', 'Forwards stepwise')
+measures <- c("rsq", "adjr2", "cp", "bic")
+our_names <- c("R2", "Adjusted R2", "Cp", "BIC")
+
+feat_sel <- NULL
+
+for (n in 1:3) {
+  measure_err <- NULL
+  meth <- methods[n]
+  for (j in 1:4) {
+    measure <- measures[j]
+    tr_err <- NULL
+    te_err <- NULL
+    for (i in 1:K.1) {
+      X_train <- X[fold_ind.1 != i, ]
+      y_train <- y[fold_ind.1 != i]
+      X_test <- X[fold_ind.1 == i, ]
+      y_test <- y[fold_ind.1 == i]
+      
+      best_subset <- regsubsets(mental ~ ., data = df[fold_ind.1 != i, ], method = meth, nvmax = 24)
+      best_subset_sum <- summary(best_subset)
+    
+      ind <- which.min(best_subset_sum[[measure]])
+      best_coef <- coef(best_subset, ind)
+      # print(best_coef)
+      
+      tr_x <- X_train[, names(best_coef)[-1]]
+      train_pred <- cbind(1, tr_x) %*% best_coef
+      tr_err <- c(tr_err, mean((train_pred - y_train)^2))
+      te_x <- X_test[, names(best_coef)[-1]]
+      test_pred <- cbind(1, tr_x) %*% best_coef
+      te_err <- c(te_err, mean((test_pred - y_test)^2))
+    }
+    measure_err[[j]] <- list(round(mean(tr_err), 3), round(mean(te_err), 3))
+    # cat('\n', method_names[n], 'regression using', our_names[j], 'training error:', mean(tr_err))
+    # cat('\n', method_names[n], 'regression using', our_names[j], 'testing error:', mean(te_err), '\n\n')
+    
+  }
+  feat_sel[[n]] <- measure_err
+}
+```
+
+
+```{r, include=FALSE}
+## KNN
+
+set.seed(2)
+
+tr_err <- NULL
+te_err <- NULL
+
+for (i in 1:K.1) {
+  X_train <- X[fold_ind.1 != i, ]
+  y_train <- y[fold_ind.1 != i]
+  X_test <- X[fold_ind.1 == i, ]
+  y_test <- y[fold_ind.1 == i]
+  
+  # generate fold indices for parameter selection CV
+  n.2 <- sum(fold_ind.1 != i)
+  f.2 <- ceiling(n.2/K.2)
+  fold_ind.2 <- sample(rep(1L:K.2, f.2), n.2)
+
+  # choose best parameter vajlue
+  K_seq <- 1:f.2
+  for (j in 1:K.2) {
+    X_cv_train <- X_train[fold_ind.2 != j,]
+    y_cv_train <- y_train[fold_ind.2 != j]
+    X_cv_test <- X_train[fold_ind.2 == j, ]
+    y_cv_test <- y_train[fold_ind.2 == j]
+    CV_error_seq <- NULL
+    for (K_cur in K_seq) {
+      fit_knn <- knnreg(mental ~ ., x = X_cv_train, y = y_cv_train, k = K_cur)
+      pred_knn <- predict(fit_knn, newdata = X_cv_test)
+      CV_error_seq <- c(CV_error_seq, mean((pred_knn - y_cv_test)^2))
+    }
+  }
+  best_k <- which.min(CV_error_seq)
+  
+  # fit using parameter
+  fit_knn <- knnreg(mental ~ ., x = X_train, y = y_train, k = best_k)
+
+  train_pred <- predict(fit_knn, X_train)
+  tr_err <- c(tr_err, mean((train_pred - y_train)^2))
+  test_pred <- predict(fit_knn, X_test)
+  te_err <- c(te_err, mean((test_pred - y_test)^2))
+  
+  print(best_k)
+}
+
+KNN_tr_mean <- round(mean(tr_err), 3)
+KNN_te_mean <- round(mean(te_err), 3)
+KNN_te_best <- round(min(te_err), 3)
+```
+
+```{r, include=FALSE}
+## Pruning
+
+set.seed(2)
+
+tr_err <- NULL
+te_err <- NULL
+best_err <- Inf
+max_size <- 0
+
+for (i in 1:K.1) {
+  X_train <- X[fold_ind.1 != i, ]
+  y_train <- y[fold_ind.1 != i]
+  X_test <- X[fold_ind.1 == i, ]
+  y_test <- y[fold_ind.1 == i]
+  tmp <- df[fold_ind.1 != i, ]
+  
+  tree.mental <- tree(mental ~ ., data = tmp)
+  cv.mental <- cv.tree(tree.mental, K = K.2)
+  
+  bestsize <- cv.mental$size[which.min(cv.mental$dev)] ##Get the best tree size (no. of leaf nodes)
+  prune.mental <- prune.tree(tree.mental, best = bestsize) ##Prune the tree to this size
+  
+  # plot(prune.mental)
+  # text(prune.mental)
+
+  train_pred <- predict(tree.mental, as.tibble(X_train))
+  tr_err <- c(tr_err, mean((train_pred - y_train)^2))
+  test_pred <- predict(tree.mental, as.tibble(X_test))
+  te_err <- c(te_err, mean((test_pred - y_test)^2))
+  
+  # Best prune plot
+  if (mean((test_pred - y_test)^2) < best_err) {
+    best_err <- mean((test_pred - y_test)^2)
+    prune_best <- prune.mental
+  }
+  # Most complex plot
+  if (bestsize > max_size) {
+    max_size <- bestsize
+    prune_complex <- prune.mental
+  }
+}
+
+prune_tr_mean <- round(mean(tr_err), 3)
+prune_te_mean <- round(mean(te_err), 3)
+prune_te_best <- round(min(te_err), 3)
+```
+
+```{r, include=FALSE}
+## Random Forests
+
+set.seed(2)
+
+tr_err <- NULL
+te_err <- NULL
+best_err <- Inf
+
+for (i in 1:K.1) {
+  X_train <- X[fold_ind.1 != i, ]
+  y_train <- y[fold_ind.1 != i]
+  X_test <- X[fold_ind.1 == i, ]
+  y_test <- y[fold_ind.1 == i]
+  tmp <- df[fold_ind.1 != i, ]
+  
+  rf.mental <- randomForest(mental ~ ., data = tmp, importance = TRUE)
+
+  # importance(rf.mental)
+  # varImpPlot(rf.mental)
+
+  train_pred <- predict(rf.mental, as.tibble(X_train))
+  tr_err <- c(tr_err, mean((train_pred - y_train)^2))
+  test_pred <- predict(rf.mental, as.tibble(X_test))
+  te_err <- c(te_err, mean((test_pred - y_test)^2))
+  
+  if (mean((test_pred - y_test)^2) < best_err) {
+    best_err <- mean((test_pred - y_test)^2)
+    rf_best <- rf.mental
+  }
+}
+
+rf_tr_mean <- round(mean(tr_err), 3)
+rf_te_mean <- round(mean(te_err), 3)
+rf_te_best <- round(min(te_err), 3)
+```
+
+```{r, include=FALSE}
+## Boosting
+
+set.seed(2)
+
+tr_err <- NULL
+te_err <- NULL
+best_err <- Inf
+
+for (i in 1:K.1) {
+  X_train <- X[fold_ind.1 != i, ]
+  y_train <- y[fold_ind.1 != i]
+  X_test <- X[fold_ind.1 == i, ]
+  y_test <- y[fold_ind.1 == i]
+  tmp <- df[fold_ind.1 != i, ]
+  
+  boost.mental <- gbm(mental ~ ., data = tmp, distribution = "gaussian", n.trees = 5000, cv.folds = K.2)
+
+  # summary(boost.mental)
+  
+  train_pred <- predict(boost.mental, as.tibble(X_train))
+  tr_err <- c(tr_err, mean((train_pred - y_train)^2))
+  test_pred <- predict(boost.mental, as.tibble(X_test))
+  te_err <- c(te_err, mean((test_pred - y_test)^2))
+  
+  if (mean((test_pred - y_test)^2) < best_err) {
+    best_err <- mean((test_pred - y_test)^2)
+    gbm_best <- boost.mental
+  }
+}
+
+gbm_tr_mean <- round(mean(tr_err), 3)
+gbm_te_mean <- round(mean(te_err), 3)
+gbm_te_best <- round(min(te_err), 3)
+
+```
+
+## Results
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{|l|c|c|c|}
+\hline
+\textbf{Algorithm} & \textbf{Average Training MSE} & \textbf{Average Testing MSE} & \textbf{Lowest Testing MSE} \\ \hline
+Linear regression & `r mlr_tr_mean` & `r mlr_te_mean` & `r mlr_te_best` \\ \hline
+LASSO & `r LASSO_tr_mean` & `r LASSO_te_mean` & `r LASSO_te_best` \\ \hline
+KNN regression & `r KNN_tr_mean` & `r KNN_te_mean` & `r KNN_te_best` \\ \hline
+Pruning & `r prune_tr_mean` & `r prune_te_mean` & `r prune_te_best` \\ \hline
+Random forests & `r rf_tr_mean` & `r rf_te_mean` & `r rf_te_best` \\ \hline
+Boosting (GBM) & `r gbm_tr_mean` & `r gbm_te_mean` & `r gbm_te_best` \\ \hline
+\end{tabular}
+\caption{Model/Algorithm performance results}
+\label{tab:model_algorithm_performance}
+\end{table}
+
+### Baseline Model: Multiple Linear Regression
+Our baseline model using multiple linear regression (MLR) yielded limited predictive power. Across all folds of the nested cross-validation, the average training mean squared error (MSE) was `r mlr_tr_mean`. The average test MSE ballooned into billions due to the influence of an extreme outlier in the dataset. In all runs, adjusted $R^2$ values were below 0.1, indicating that the linear model explained less than 10% of the variance in the composite mental health score. \
+
+All models had statistically significant F-statistics at the $\alpha = 0.05$ level. Among all predictors, age emerged as the only consistently significant variable, with a negative coefficient, suggesting a weak inverse relationship between age and mental health burden. Younger participants reported higher symptom scores on average. However, the overall model performed poorly, revealing a lack of fit and linear structure in the data.
+
+### Linear Regression with Feature Selection
+We noticed that the choice of feature selection algorithm (i.e., best subset, forwards and backwards stepwise) had almost no effect on the number of predictors chosen (\textbf{Table 2}).
+
+\begin{table}[h!]
+\centering
+\begin{tabular}{|l|cccc|cccc|}
+\hline
+\textbf{Algorithm} & \multicolumn{4}{c|}{\textbf{Average Training MSE}} & \multicolumn{4}{c|}{\textbf{Average Testing MSE}} \\ \hline
+ & R\textsuperscript{2} & Adj R\textsuperscript{2} & C\textsubscript{p} & BIC & R\textsuperscript{2} & Adj R\textsuperscript{2} & C\textsubscript{p} & BIC \\ \hline
+Best subset & `r feat_sel[[1]][[1]][[1]]` & `r feat_sel[[1]][[2]][[1]]` & `r feat_sel[[1]][[3]][[1]]` & `r feat_sel[[1]][[4]][[1]]` & `r feat_sel[[1]][[1]][[2]]` & `r feat_sel[[1]][[2]][[2]]` & `r feat_sel[[1]][[3]][[2]]` & `r feat_sel[[1]][[4]][[2]]` \\ \hline
+Forwards & `r feat_sel[[2]][[1]][[1]]` & `r feat_sel[[2]][[2]][[1]]` & `r feat_sel[[2]][[3]][[1]]` & `r feat_sel[[2]][[4]][[1]]` & `r feat_sel[[2]][[1]][[2]]` & `r feat_sel[[2]][[2]][[2]]` & `r feat_sel[[2]][[3]][[2]]` & `r feat_sel[[2]][[4]][[2]]` \\ \hline
+Backwards & `r feat_sel[[3]][[1]][[1]]` & `r feat_sel[[3]][[2]][[1]]` & `r feat_sel[[3]][[3]][[1]]` & `r feat_sel[[3]][[4]][[1]]` & `r feat_sel[[3]][[1]][[2]]` & `r feat_sel[[3]][[2]][[2]]` & `r feat_sel[[3]][[3]][[2]]`7 & `r feat_sel[[3]][[4]][[2]]` \\ \hline
+\end{tabular}
+\caption{Training and Testing MSE across Feature Selection Methods}
+\label{tab:training_testing_mse}
+\end{table}
+
+Age was selected in every model. In addition, variables like hours of music listening per day and frequency of listening to rock, metal, and EDM were frequently chosen and showed positive coefficients. Notably, Mallow’s Cp tended to select larger models with 6–8 predictors, while BIC and adjusted $R^2$ favored more parsimonious models with 1–3 predictors. \
+Despite slightly improved interpretability, these feature selection methods did not significantly enhance model performance. Testing MSEs remained high and $R^2$ values remained low.
+
+### LASSO Regression
+
+LASSO regression offered slight improvements in performance and model simplicity compared to simple MLR. It consistently selected between 7 and 13 predictors, retaining core variables such as age, hours of music listening per day, and frequencies of listening to EDM, folk, metal, and rock. The average training MSE was `r LASSO_tr_mean`, and the average testing MSE dropped to `r LASSO_te_mean`. \
+
+The sparsity introduced by L1 regularization reduced model complexity while retaining the most predictive features.
+
+### K-Nearest Neighbors (KNN) Regression
+
+The average training MSE was `r KNN_tr_mean`, and the average testing MSE was `r KNN_te_mean`. Notably, the best-performing KNN model achieved a testing MSE of `r KNN_te_best`. \
+
+Selected values of K varied significantly across folds, ranging from 2 to 57, indicating sensitivity to partitioning and potential instability in nearest-neighbor structure. 
+
+### Decision Trees (Pruning)
+
+Using cost-complexity pruning and cross-validation to determine optimal tree size, we found that the tree sizes produced varied between 2 to 6 leaf nodes (\textbf{Figure 2} and \textbf{Figure 3}). Interestingly, the highest performing tree had only two leaf nodes splitting on age.
+
+The average training MSE was `r prune_tr_mean`, while the average testing MSE was `r prune_te_mean`. The best model achieved a testing MSE of `r prune_te_best`. These trees were often structured around splits on age and frequency of rock, metal, or EDM listening.
+
+### Random Forests
+
+Random forests achieved one of the lowest testing MSEs of all models. With an average training MSE of just `r rf_tr_mean` (suggesting overfitting) and an average testing MSE of `r rf_te_mean`, the model demonstrated strong performance at the cost of transparency. The best forest model had a testing MSE of `r rf_te_best`. \
+
+Feature importance rankings, confirmed prior findings: age, hours of listening, and frequency of metal and EDM listening were among the most impactful variables (\textbf{Figure 4}).
+
+### Boosting
+
+Boosting models had an average training MSE of `r gbm_tr_mean` and an average testing MSE of `r gbm_te_mean`. The lowest testing MSE observed was `r gbm_te_best`. While boosting performed similarly to random forests, it required significantly longer computation time. Again, age was the most influential predictor (\textbf{Figure 5}). \
+
+### Discussion
+
+This project set out to explore whether patterns in music-listening behavior could be used to predict self-reported mental health outcomes. Our investigation through multiple modeling techniques revealed that while certain features, such as age, hours of music listening per day, and frequency of listening to specific genres, showed consistent associations with mental health scores, the overall predictive performance across models was very poor. \
+
+Testing prediction performance was very similar and quite lackluster across the board (\textbf{Table 1}). Among all algorithms tested, pruned decision trees would be our recommended algorithm, as it offered the best balance between accuracy and interpretability, achieving comparable testing MSE while being the easiest to interpret. Random forests and boosting yielded slightly better raw performance but at the cost of transparency and computational efficiency. Simple MLR was the worst as it’s highly sensitive to outliers. \
+
+Age was the most consistently predictive feature across all models, with younger participants tending to report higher mental health symptom burdens. Additionally, frequent listening to genres such as rock, metal, and EDM was positively correlated with higher composite mental health scores. This aligns with prior literature suggesting that these genres are often chosen for emotional intensity or catharsis, and may be preferred by individuals experiencing heightened emotional states. However, causality cannot be inferred from these results. \
+
+Many possible explanations exist for the overall poor performance, including the methods utilized in our approach. Our choice to combine the scores for four different mental health disorders, while convenient, may have obfuscated important differences between the disorders. Additionally, our choice to encode frequency ratings numerically is another potential limitation. While the frequency responses are indeed ordered and the encoding allows for smoother integration into certain models (especially the linear regression-based ones), it assumes equal intervals between categories such as “Rarely” and “Sometimes,” which probably don’t apply to participants’ responses. Additionally, we may have omitted features with significant explanatory potential by excluding categorical and text-based variables (e.g., open responses or country of residence). Finally, the models and algorithms used may not be complex enough to capture highly complex relationships between variables. \
+
+In our opinion, the more likely source for this issue lies with the dataset in that it contains mostly noise with little or no relationship between the predictors and the response. We believe this to be the case due to the results we observed. Throughout the entire analysis, we noticed that performance did not significantly improve with increased model complexity. Linear regression with best subset selection using $R^2$ as the criterion produced models with a single predictor (age) and was only marginally outperformed by much more complex algorithms like Random Forest. Another example is with the decision trees produced by pruning; the highest performing tree was one with the smallest possible tree size, with only two leaf nodes (\textbf{Figure 2}). A likely explanation for this, if it’s indeed true, is that the data is biased due to how it was collected. Since the survey was posted on specific online sites, there is likely to be selection bias and/or information bias. People responding to a random online anonymous survey may be more likely to answer untruthfully or haphazardly. Such bias, if present, could affect the ability to observe actual relationships within the data. \
+
+There are thus many approaches to future work. One would be to focus on the relationship between music and specific disorders like depression or OCD individually, instead of aggregating them. Second, consider experimenting with even more complex models/algorithms like deep learning. However, we think it’s unlikely these changes would significantly improve results. The better approach, we believe, would be to change the data being analyzed by either switching to ur supplementing with other data. If not, at the very least, experimenting with the original features, encoding, or other feature engineering strategies is necessary.  \
+
+In conclusion, our results suggest that while music-listening habits hold some predictive value for mental health, they are insufficient in isolation for accurate prediction. However, they may still serve as a useful component in broader, multimodal assessments that combine behavioral, psychological, and contextual data. More than anything, this study affirms the complexity of how people use and interact with music.
+
+\newpage
+## Contributions
+
+This project was a collaborative effort between both group members, with responsibilities divided based on individual strengths and interests. \
+ 
+\textbf{Andrew Shao} led the technical implementation of the machine learning models. He was primarily responsible for data preprocessing, coding the feature selection routines, running nested cross-validation, and training all models including linear regression, LASSO, KNN, decision trees, random forests, and boosting. Andrew also managed the statistical evaluation of model performance and was the point person for debugging and optimizing the R code. \
+
+\textbf{Joy Qiu} contributed to the initial exploratory data analysis, created several of the data visualizations, and helped frame the research question and hypotheses. Joy also took the lead on crafting the project presentation, writing the report sections, and interpreting the results in relation to public health relevance and prior literature. Additionally, Joy reviewed the outputs of the models, selected figures to be included in the final documentation, and coordinated the structure and flow of the written report.
+
+
+\newpage
+
+\section*{References}
+
+\noindent
+Garrido, S., \& Schubert, E. (2013). Adaptive and maladaptive attraction to negative emotions in music. \textit{Musicae Scientiae}, \textit{17}(2), 147--166. \url{https://doi.org/10.1177/1029864913478305}
+
+\medskip
+
+\noindent
+Rentfrow, P. J., \& Gosling, S. D. (2003). The do re mi’s of everyday life: The structure and personality correlates of music preferences. \textit{Journal of Personality and Social Psychology}, \textit{84}(6), 1236--1256. \url{https://doi.org/10.1037/0022-3514.84.6.1236}
+
+\medskip
+
+\noindent
+Sharman, L., \& Dingle, G. A. (2015). Extreme metal music and anger processing. \textit{Frontiers in Human Neuroscience}, \textit{9}, 272. \url{https://doi.org/10.3389/fnhum.2015.00272}
+
+\newpage
+
+## Appendix
+\textbf{Figure 1. Mental health score (response variable) distribution} \
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+ggplot(df, aes(x = mental)) + geom_histogram(fill = 'lightblue', bins = 20) + theme_classic() + labs(x = 'Score', y= 'Count')
+```
+\newpage
+
+\textbf{Figure 2. Best performing pruned tree} \
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+plot(prune_best)
+text(prune_best)
+```
+\newpage
+
+\textbf{Figure 3. Most complex pruned tree} \
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+plot(prune_complex)
+text(prune_complex)
+```
+\newpage
+
+\textbf{Figure 4. Random forests variable importance plots} \
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+importance(rf_best)
+varImpPlot(rf_best)
+```
+\newpage
+
+\textbf{Figure 5. Boosting influence plot} \
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+summary(gbm_best)
+```
+\newpage
+
+\textbf{Figure 6. Plot of music genre vs. average depression score} \
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+# Load the data
+df <- read_csv("mxmh_survey_results.csv")
+
+# Select only relevant columns
+genre_columns <- grep("Frequency", names(df), value = TRUE)
+mental_health_columns <- c("Anxiety", "Depression", "Insomnia", "OCD")
+genre_data <- df[, c(genre_columns, mental_health_columns)]
+
+# Drop NA rows
+genre_data <- na.omit(genre_data)
+
+# Initialize empty list
+summary_list <- list()
+
+# Loop through each genre
+for (genre in genre_columns) {
+  temp <- genre_data %>%
+    filter(.data[[genre]] == "Very frequently") %>%
+    summarise(
+      Anxiety = mean(Anxiety, na.rm = TRUE),
+      Depression = mean(Depression, na.rm = TRUE),
+      Insomnia = mean(Insomnia, na.rm = TRUE),
+      OCD = mean(OCD, na.rm = TRUE)
+    )
+  temp$Genre <- gsub("Frequency \\[|\\]", "", genre)
+  summary_list[[genre]] <- temp
+}
+
+# Combine all into a single dataframe
+very_freq_summary <- bind_rows(summary_list)
+
+# Reorder by Depression scores
+very_freq_summary <- very_freq_summary %>%
+  arrange(Depression)
+
+# Plot
+ggplot(very_freq_summary, aes(x = reorder(Genre, Depression), y = Depression)) +
+  geom_bar(stat = "identity", fill = "#BDBEFF", color = "black") +
+  geom_text(aes(label = round(Depression, 2)), vjust = -0.5) +
+  labs(
+    x = "Genre",
+    y = "Depression Score (0-10)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(face = "bold")
+  ) +
+  ylim(0, 7)
+```
+\newpage
+
+\textbf{Figure 7. Plot of age group vs. average depression score} \
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+# Load the dataset
+df <- read_csv("mxmh_survey_results.csv")
+
+# Create Age Groups
+df <- df %>%
+  mutate(AgeGroup = case_when(
+    Age < 18 ~ "<18",
+    Age >= 18 & Age <= 25 ~ "18-25",
+    Age >= 26 & Age <= 35 ~ "26-35",
+    Age >= 36 & Age <= 50 ~ "36-50",
+    Age >= 51 & Age <= 65 ~ "51-65",
+    Age > 65 ~ "65+",
+    TRUE ~ NA_character_
+  ))
+
+# Drop NA values
+df <- df %>%
+  filter(!is.na(AgeGroup), !is.na(Depression))
+
+# Group by AgeGroup and calculate average Depression
+agegroup_depression <- df %>%
+  group_by(AgeGroup) %>%
+  summarise(AvgDepression = mean(Depression, na.rm = TRUE)) %>%
+  arrange(factor(AgeGroup, levels = c("<18", "18-25", "26-35", "36-50", "51-65", "65+")))
+
+# Plot
+ggplot(agegroup_depression, aes(x = AgeGroup, y = AvgDepression)) +
+  geom_bar(stat = "identity", fill = "grey", color = "black") +
+  geom_text(aes(label = round(AvgDepression, 2)), vjust = -0.5) +
+  labs(
+    x = "Age Group",
+    y = "Depression Score (0-10)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5)
+  ) +
+  ylim(0, 10)
+```
+\newpage
+
+\textbf{Figure 8. Plot of age groups and their top genres}\
+```{r, echo=FALSE, results='hide', message=FALSE, warning=FALSE}
+# Load the data
+df <- read_csv("mxmh_survey_results.csv")
+
+# Create Age Groups
+df <- df %>%
+  mutate(AgeGroup = case_when(
+    Age < 18 ~ "<18",
+    Age >= 18 & Age <= 25 ~ "18-25",
+    Age >= 26 & Age <= 35 ~ "26-35",
+    Age >= 36 & Age <= 50 ~ "36-50",
+    Age >= 51 & Age <= 65 ~ "51-65",
+    Age > 65 ~ "65+",
+    TRUE ~ NA_character_
+  ))
+
+# Choose the genres you want to plot
+selected_genres <- c("Frequency [Rock]", "Frequency [Pop]", "Frequency [EDM]",
+                     "Frequency [Gospel]", "Frequency [Hip hop]", "Frequency [Classical]")
+
+# Prepare data
+very_freq_data <- df %>%
+  select(AgeGroup, all_of(selected_genres)) %>%
+  pivot_longer(cols = -AgeGroup, names_to = "Genre", values_to = "Frequency") %>%
+  filter(Frequency == "Very frequently") %>%
+  group_by(AgeGroup, Genre) %>%
+  summarise(Count = n(), .groups = "drop")
+
+# Calculate total respondents per age group for percentages
+total_per_agegroup <- df %>%
+  group_by(AgeGroup) %>%
+  summarise(Total = n(), .groups = "drop")
+
+# Merge totals
+very_freq_data <- very_freq_data %>%
+  left_join(total_per_agegroup, by = "AgeGroup") %>%
+  mutate(Percentage = (Count / Total) * 100)
+
+# Clean genre names
+very_freq_data$Genre <- gsub("Frequency \\[|\\]", "", very_freq_data$Genre)
+very_freq_data <- very_freq_data %>% filter(!is.na(AgeGroup))
+
+# Plot
+ggplot(very_freq_data, aes(x = AgeGroup, y = Percentage, fill = Genre)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  labs(
+    x = "Age Group",
+    y = "Percentage (%)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    legend.title = element_blank()
+  ) +
+  scale_fill_manual(values = c(
+    "Rock" = "#FFB6B6",
+    "Pop" = "#FFD6A5",
+    "EDM" = "#FDFFB6",
+    "Gospel" = "#CAFFBF",
+    "Hip hop" = "#9BF6FF",
+    "Classical" = "#E0BBE4"
+  ))
+```
+
